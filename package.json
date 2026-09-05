@@ -1,0 +1,15 @@
+{
+  "name": "skillsphere-monorepo",
+  "version": "1.0.0",
+  "description": "SkillSphere - Academia-Industry Collaboration Portal (Team INNOVEX, SIH 2026)",
+  "scripts": {
+    "test": "node backend/tests/aiServices.test.js",
+    "server": "node backend/server.js",
+    "dev:backend": "node backend/server.js",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend"
+  },
+  "keywords": ["skillsphere", "sih2026", "innovex", "ai", "nlp"],
+  "author": "Team INNOVEX",
+  "license": "ISC"
+}
