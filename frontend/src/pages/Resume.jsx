@@ -15,6 +15,9 @@ import {
 export default function Resume() {
   const [profile, setProfile] = useState(null);
   const [file, setFile] = useState(null);
+  const [resumeText, setResumeText] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [analysisResult, setAnalysisResult] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [analysisState, setAnalysisState] = useState('idle'); // 'idle' | 'analyzing' | 'complete'
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -53,18 +56,41 @@ export default function Resume() {
   };
 
   const handleAnalyze = async () => {
+    if (!resumeText || !resumeText.trim()) {
+      setErrorMessage('Please enter or paste your resume text to analyze.');
+      return;
+    }
+
+    setErrorMessage('');
     setAnalysisState('analyzing');
-    const fileName = file ? file.name : (profile?.uploadedResumeName || 'candidate_resume.pdf');
-    
-    // Simulate 1.5s AI analysis execution
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    await api.analyzeResume(fileName);
 
-    setAnalysisState('complete');
+    try {
+      const res = await api.analyzeResumeText(resumeText);
+      const apiData = res.data;
 
-    // Refresh profile state
-    const updated = await api.getProfile();
-    setProfile(updated);
+      setAnalysisResult({
+        extractedSkills: apiData.extracted_skills.map((s) => ({
+          name: s,
+          category: 'Technical Skill',
+          verified: true,
+        })),
+        employabilityScore: apiData.employability_score,
+        skillCount: apiData.skill_count,
+        explanation: apiData.explanation,
+      });
+
+      setAnalysisState('complete');
+
+      if (profile) {
+        setProfile({
+          ...profile,
+          employabilityScore: apiData.employability_score,
+        });
+      }
+    } catch (err) {
+      setAnalysisState('idle');
+      setErrorMessage(err.message || 'API request failed while analyzing resume text.');
+    }
   };
 
   if (!profile) return null;
@@ -72,16 +98,21 @@ export default function Resume() {
   const currentFileName = file ? file.name : (profile.uploadedResumeName || 'candidate_resume.pdf');
   const fileSizeText = file ? `${(file.size / 1024).toFixed(1)} KB` : '240 KB';
 
-  const extractedSkills = [
-    { name: 'Python', category: 'Programming', verified: true },
-    { name: 'Java', category: 'Programming', verified: true },
-    { name: 'SQL', category: 'Database', verified: true },
-    { name: 'React', category: 'Frontend', verified: true },
-    { name: 'HTML', category: 'Frontend', verified: true },
-    { name: 'CSS', category: 'Frontend', verified: true },
-    { name: 'JavaScript', category: 'Frontend', verified: true },
-    { name: 'Git', category: 'Tools', verified: true },
-  ];
+  const displayedSkills = analysisResult
+    ? analysisResult.extractedSkills
+    : [
+        { name: 'Python', category: 'Programming', verified: true },
+        { name: 'Java', category: 'Programming', verified: true },
+        { name: 'SQL', category: 'Database', verified: true },
+        { name: 'React', category: 'Frontend', verified: true },
+        { name: 'HTML', category: 'Frontend', verified: true },
+        { name: 'CSS', category: 'Frontend', verified: true },
+        { name: 'JavaScript', category: 'Frontend', verified: true },
+        { name: 'Git', category: 'Tools', verified: true },
+      ];
+
+  const displayedScore = analysisResult ? analysisResult.employabilityScore : 85;
+  const displayedCount = analysisResult ? analysisResult.skillCount : 8;
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -136,6 +167,29 @@ export default function Resume() {
                 <p className="text-xs text-slate-500 mt-1">Supports PDF, DOCX up to 10MB</p>
               </label>
             </div>
+
+            {/* Resume Text Area */}
+            <div className="mt-4">
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Paste / Enter Resume Text (for AI Skill Analysis)
+              </label>
+              <textarea
+                rows={4}
+                value={resumeText}
+                onChange={(e) => {
+                  setResumeText(e.target.value);
+                  setErrorMessage('');
+                }}
+                placeholder="Paste your resume summary, skills, or experience here (e.g. Experienced in Python, React, PostgreSQL, Git...)"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-medium text-slate-800"
+              />
+            </div>
+
+            {errorMessage && (
+              <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+                {errorMessage}
+              </div>
+            )}
 
             <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <span className="text-xs text-slate-500">
@@ -202,7 +256,7 @@ export default function Resume() {
               <div className="p-4 rounded-xl bg-slate-100/70 border border-slate-200 text-center space-y-2">
                 <p className="text-xs font-semibold text-slate-700">Ready to Analyze</p>
                 <p className="text-xs text-slate-500">
-                  Upload your resume and click <strong className="text-blue-600">Analyze Resume</strong> to extract skills and calculate employability score.
+                  Paste your resume text and click <strong className="text-blue-600">Analyze Resume</strong> to extract skills and calculate employability score.
                 </p>
               </div>
             )}
@@ -214,7 +268,7 @@ export default function Resume() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  <span>Analyzing Resume...</span>
+                  <span>Analyzing Resume Text...</span>
                 </div>
                 <p className="text-xs text-slate-600">
                   Extracting skills and calculating employability score...
@@ -228,17 +282,18 @@ export default function Resume() {
             {analysisState === 'complete' && (
               <div className="space-y-2 text-xs transition-all duration-300">
                 <div className="flex justify-between py-1.5 border-b border-slate-100">
-                  <span className="text-slate-500">Parsing Accuracy</span>
-                  <span className="font-bold text-slate-900">98.4%</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100">
                   <span className="text-slate-500">Extracted Skills</span>
-                  <span className="font-bold text-blue-600">8 Key Skills</span>
+                  <span className="font-bold text-blue-600">{displayedCount} Key Skills</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-100">
-                  <span className="text-slate-500">Employability Index Boost</span>
-                  <span className="font-bold text-emerald-600">+8 Score Points</span>
+                  <span className="text-slate-500">Employability Index</span>
+                  <span className="font-bold text-emerald-600">{displayedScore} / 100</span>
                 </div>
+                {analysisResult?.explanation && (
+                  <div className="pt-2 text-slate-600 text-[11px] leading-relaxed bg-blue-50/50 p-2.5 rounded-xl border border-blue-100">
+                    <strong className="text-blue-900">Score Explanation:</strong> {analysisResult.explanation}
+                  </div>
+                )}
               </div>
             )}
           </Card>
@@ -269,7 +324,7 @@ export default function Resume() {
           title="Extracted Skills & Verification Status"
           subtitle={
             analysisState === 'complete'
-              ? '8 proficiencies extracted automatically from resume'
+              ? `${displayedCount} proficiencies extracted automatically from resume`
               : 'Upload and analyze resume to view extracted skills'
           }
           action={
@@ -286,7 +341,7 @@ export default function Resume() {
           {analysisState === 'complete' ? (
             <div className="space-y-5 transition-all duration-300">
               <div className="flex flex-wrap gap-2">
-                {extractedSkills.map((skill, index) => (
+                {displayedSkills.map((skill, index) => (
                   <SkillBadge
                     key={index}
                     name={skill.name}
@@ -299,9 +354,9 @@ export default function Resume() {
 
               {/* Extracted Skills Summary Grid */}
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center text-xs">
-                {['Python', 'Java', 'SQL', 'React', 'HTML', 'CSS', 'JavaScript', 'Git'].map((s) => (
-                  <div key={s} className="p-2 bg-white rounded-lg border border-slate-200">
-                    <p className="font-bold text-slate-800">{s}</p>
+                {displayedSkills.map((s, idx) => (
+                  <div key={idx} className="p-2 bg-white rounded-lg border border-slate-200">
+                    <p className="font-bold text-slate-800">{s.name}</p>
                     <p className="text-[11px] font-semibold text-emerald-600 mt-0.5">Verified ✓</p>
                   </div>
                 ))}
@@ -312,7 +367,7 @@ export default function Resume() {
               <IconSparkles className="w-8 h-8 text-slate-300 mx-auto" />
               <p className="text-xs font-bold text-slate-700">No Extracted Skills Displayed Yet</p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Upload your resume and click <strong className="text-blue-600">Analyze Resume</strong> above to extract and verify your skills.
+                Paste your resume text and click <strong className="text-blue-600">Analyze Resume</strong> above to extract and verify your skills.
               </p>
             </div>
           )}

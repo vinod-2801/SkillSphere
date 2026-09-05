@@ -461,6 +461,31 @@ export const api = {
     });
   },
 
+  analyzeResumeText: async (text) => {
+    const token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (localStorage.getItem('skillsphere_current_user')
+        ? JSON.parse(localStorage.getItem('skillsphere_current_user')).token
+        : '') ||
+      '';
+
+    const response = await fetch('http://localhost:5000/api/resumes/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ text }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to analyze resume text');
+    }
+    return data;
+  },
+
   analyzeResume: async (fileName = 'resume.pdf') => {
     return new Promise((resolve) => {
       setTimeout(() => {
