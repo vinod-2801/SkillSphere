@@ -1,0 +1,22 @@
+{
+  "name": "skillsphere-backend",
+  "version": "1.0.0",
+  "description": "SkillSphere AI Intelligence Backend (Team INNOVEX, SIH 2026)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/aiServices.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1",
+    "pg": "^8.13.1"
+  },
+  "keywords": ["skillsphere", "backend", "ai", "sih2026"],
+  "author": "Team INNOVEX",
+  "license": "ISC"
+}
