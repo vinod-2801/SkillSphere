@@ -7,6 +7,8 @@ const ALLOWED_ROLES = ['student', 'industry', 'academician', 'institution_admin'
 
 /**
  * POST /api/auth/register
+ * Accepts name, valid email format, password, role.
+ * Validates email format with regex and checks for duplicate email.
  */
 const register = async (req, res, next) => {
   try {
@@ -16,13 +18,25 @@ const register = async (req, res, next) => {
     if (!name || typeof name !== 'string' || !name.trim()) {
       return sendError(res, 400, 'Validation Error: Full name is required');
     }
-    if (!email || typeof email !== 'string' || !email.includes('@')) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || typeof email !== 'string' || !emailRegex.test(email.trim())) {
       return sendError(res, 400, 'Validation Error: A valid email address is required');
     }
     if (!password || typeof password !== 'string' || password.length < 6) {
       return sendError(res, 400, 'Validation Error: Password must be at least 6 characters long');
     }
-    if (!role || !ALLOWED_ROLES.includes(role)) {
+    const rawRole = (role || 'student').toString().toLowerCase().trim().replace(/\s+/g, '_');
+    const roleMap = {
+      student: 'student',
+      industry: 'industry',
+      academician: 'academician',
+      institution: 'institution_admin',
+      institution_admin: 'institution_admin',
+      platform_admin: 'platform_admin'
+    };
+    const targetRole = roleMap[rawRole] || 'student';
+
+    if (!targetRole || !ALLOWED_ROLES.includes(targetRole)) {
       return sendError(
         res,
         400,
@@ -45,10 +59,10 @@ const register = async (req, res, next) => {
       name: name.trim(),
       email: email.trim(),
       passwordHash,
-      role,
+      role: targetRole,
     });
 
-    // 5. Return Safe User Info (password_hash is excluded by model)
+    // 5. Return Safe User Info
     return sendSuccess(res, 201, 'User registered successfully', newUser);
   } catch (error) {
     next(error);
@@ -113,7 +127,6 @@ const login = async (req, res, next) => {
 
 /**
  * POST /api/auth/logout
- * Stateless JWT logout: returns confirmation to client so frontend can clear local storage / authorization headers.
  */
 const logout = async (req, res) => {
   return sendSuccess(

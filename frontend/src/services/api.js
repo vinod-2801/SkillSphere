@@ -219,135 +219,113 @@ export const api = {
   },
 
   registerUser: async (userData) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const name = (userData.fullName || userData.name || '').trim();
-        const email = (userData.email || '').trim().toLowerCase();
-        const password = userData.password || '';
-        const role = userData.role || 'Student';
-        const institution = userData.institution || 'SkillSphere Network';
+    const name = (userData.fullName || userData.name || '').trim();
+    const email = (userData.email || '').trim().toLowerCase();
+    const password = userData.password || '';
+    const role = userData.role || 'Student';
+    const institution = userData.institution || 'SkillSphere Network';
 
-        if (!name || !email || !password) {
-          resolve({ success: false, error: 'Please fill in all required fields.' });
-          return;
-        }
+    if (!name || !email || !password) {
+      return { success: false, error: 'Please fill in all required fields.' };
+    }
 
-        const registeredUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-        const existing = registeredUsers.find((u) => u.email === email);
-        if (existing) {
-          resolve({ success: false, error: 'Account with this email already exists. Please login.' });
-          return;
-        }
+    try {
+      // 1. Call backend registration endpoint
+      const response = await fetch('http://localhost:5000/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, role }),
+      });
 
-        const userId = `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-        const newUser = {
-          id: userId,
-          name,
-          email,
-          password,
-          role,
-          institution,
-          isLoggedIn: true,
-          status: 'Active',
-          profileCompleted: false,
-          resumeUploaded: false,
-          registeredDate: new Date().toISOString().split('T')[0],
-        };
+      const resData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { success: false, error: resData.message || 'Registration failed. Please check your details.' };
+      }
+    } catch (e) {
+      console.warn('Backend register call warning:', e.message);
+    }
 
-        registeredUsers.push(newUser);
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registeredUsers));
-
-        const sessionUser = {
-          id: userId,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-          institution: newUser.institution,
-          isLoggedIn: true,
-        };
-
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(sessionUser));
-        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(sessionUser));
-
-        // Create clean, user-scoped profile
-        const skillsArray = userData.skills && typeof userData.skills === 'string' && userData.skills.trim()
-          ? userData.skills.split(',').map((s) => ({ name: s.trim(), category: 'General', verified: true, level: 'Intermediate' }))
-          : [];
-
-        const userProfile = {
-          id: userId,
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-          institution: newUser.institution,
-          degree: role === 'Student' ? 'Undergraduate Candidate' : 'Professional',
-          gradYear: '2026',
-          cgpa: 'N/A',
-          location: 'India',
-          preferredType: 'Internship & Full-time',
-          preferredLocation: 'Remote / Hybrid',
-          bio: 'SkillSphere Member',
-          employabilityScore: skillsArray.length > 0 ? 75 : null,
-          skills: skillsArray,
-          uploadedResumeName: null,
-          missingSkills: [],
-          careerInterests: [],
-        };
-
-        localStorage.setItem(getScopedKey('skillsphere_profile', userId), JSON.stringify(userProfile));
-        localStorage.setItem(getScopedKey('skillsphere_applications', userId), JSON.stringify([]));
-
-        resolve({ success: true, user: sessionUser });
-      }, 350);
-    });
+    // 2. Perform backend login to get official JWT token and setup session
+    return api.loginUser({ email, password, role, institution, name });
   },
 
   loginUser: async (credentials) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const email = (credentials.email || '').trim().toLowerCase();
-        const password = credentials.password || '';
-        const role = credentials.role;
+    const email = (credentials.email || '').trim().toLowerCase();
+    const password = credentials.password || '';
+    const role = credentials.role || 'Student';
+    const name = credentials.name || email.split('@')[0];
+    const institution = credentials.institution || 'SkillSphere Network';
 
-        const registeredUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-        const user = registeredUsers.find((u) => u.email === email);
+    if (!email || !password) {
+      return { success: false, error: 'Email and password are required.' };
+    }
 
-        if (!user) {
-          resolve({ success: false, error: 'Account not found. Please register first.' });
-          return;
-        }
+    try {
+      // 1. Attempt login against backend
+      let response = await fetch('http://localhost:5000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-        if (password && user.password && user.password !== password) {
-          resolve({ success: false, error: 'Invalid password. Please try again.' });
-          return;
-        }
+      let resData = await response.json().catch(() => ({}));
 
-        if (role) {
-          user.role = role;
-        }
+      // If user not registered in backend yet, register then retry login
+      if (!response.ok && response.status === 401) {
+        await fetch('http://localhost:5000/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role }),
+        }).catch(() => {});
 
+        response = await fetch('http://localhost:5000/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        resData = await response.json().catch(() => ({}));
+      }
+
+      if (response.ok && resData.data && resData.data.token) {
+        const token = resData.data.token;
+        const backendUser = resData.data.user || {};
+
+        // Store JWT token in localStorage under standard key "token"
+        localStorage.setItem('token', token);
+        localStorage.setItem('skillsphere_token', token);
+
+        const userId = backendUser.id || `usr_${Date.now()}`;
         const sessionUser = {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          institution: user.institution || 'SkillSphere Network',
+          id: userId,
+          name: backendUser.name || name,
+          email: backendUser.email || email,
+          role: role,
+          institution: institution,
           isLoggedIn: true,
+          token: token,
         };
 
+        // Maintain skillsphere_current_user and skillsphere_user compatibility
         localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(sessionUser));
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(sessionUser));
 
-        // Ensure user-scoped profile exists
-        const profileKey = getScopedKey('skillsphere_profile', user.id);
+        // Maintain user list in mock storage for offline list views
+        const registeredUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+        if (!registeredUsers.some((u) => u.email === email)) {
+          registeredUsers.push({ ...sessionUser, password });
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registeredUsers));
+        }
+
+        // Ensure user profile exists
+        const profileKey = getScopedKey('skillsphere_profile', userId);
         if (!localStorage.getItem(profileKey)) {
           const userProfile = {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            institution: user.institution || 'SkillSphere Network',
-            degree: user.role === 'Student' ? 'Undergraduate Candidate' : 'Professional',
+            id: userId,
+            name: sessionUser.name,
+            email: sessionUser.email,
+            role: sessionUser.role,
+            institution: sessionUser.institution,
+            degree: sessionUser.role === 'Student' ? 'Undergraduate Candidate' : 'Professional',
             gradYear: '2026',
             cgpa: 'N/A',
             location: 'India',
@@ -363,12 +341,19 @@ export const api = {
           localStorage.setItem(profileKey, JSON.stringify(userProfile));
         }
 
-        resolve({ success: true, user: sessionUser });
-      }, 300);
-    });
+        return { success: true, user: sessionUser, token };
+      } else {
+        return { success: false, error: resData.message || 'Invalid email or password. Please try again.' };
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      return { success: false, error: 'Unable to connect to authentication server.' };
+    }
   },
 
   logoutUser: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('skillsphere_token');
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     localStorage.removeItem(STORAGE_KEYS.USER);
     return { success: true };
@@ -462,13 +447,28 @@ export const api = {
   },
 
   analyzeResumeText: async (text) => {
-    const token =
+    let token =
       localStorage.getItem('token') ||
       localStorage.getItem('skillsphere_token') ||
       (localStorage.getItem('skillsphere_current_user')
         ? JSON.parse(localStorage.getItem('skillsphere_current_user')).token
         : '') ||
       '';
+
+    if (!token) {
+      const currentUser = api.getCurrentUser();
+      if (currentUser && currentUser.isLoggedIn && currentUser.email) {
+        const loginRes = await api.loginUser({
+          email: currentUser.email,
+          password: currentUser.password || 'password123',
+          role: currentUser.role || 'Student',
+          name: currentUser.name,
+        });
+        if (loginRes.success && loginRes.token) {
+          token = loginRes.token;
+        }
+      }
+    }
 
     const response = await fetch('http://localhost:5000/api/resumes/analyze', {
       method: 'POST',
@@ -927,4 +927,26 @@ export const api = {
       }, 250);
     });
   },
+};
+export const parseResumeApi = async (file) => {
+  if (!file) {
+    throw new Error('Please select a resume file.');
+  }
+
+  const result = await api.analyzeResume(file.name);
+
+  if (!result.success) {
+    throw new Error(result.error || 'Unable to analyze resume.');
+  }
+
+  return {
+    name: api.getCurrentUser()?.name || 'Student',
+    education: [],
+    skills: result.extractedSkills || [],
+    projects: [],
+    certifications: [],
+    experience: [],
+    employabilityScore: result.employabilityScore,
+    skillGap: result.skillGap || []
+  };
 };

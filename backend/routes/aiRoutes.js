@@ -208,4 +208,67 @@ router.post('/match', (req, res) => {
   }
 });
 
+/**
+ * 7. AI CHAT (Groq API Integration)
+ * POST /api/ai/chat
+ */
+router.post('/chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Message field ("message") is required.'
+      });
+    }
+
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        message: 'GROQ_API_KEY is not configured in environment.'
+      });
+    }
+
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+        messages: [
+          { role: 'system', content: 'You are SkillSphere AI Assistant for Academia-Industry career guidance.' },
+          { role: 'user', content: message.trim() }
+        ]
+      })
+    });
+
+    const data = await groqResponse.json();
+    if (!groqResponse.ok) {
+      return res.status(groqResponse.status).json({
+        success: false,
+        message: data.error?.message || 'Groq API request failed'
+      });
+    }
+
+    const reply = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+
+    return res.status(200).json({
+      success: true,
+      message: 'AI response generated successfully',
+      data: {
+        reply,
+        raw: data
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to process AI chat request.'
+    });
+  }
+});
+
 module.exports = router;

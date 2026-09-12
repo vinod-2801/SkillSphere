@@ -4,7 +4,12 @@
  * partitions common sections, and outputs structured JSON without hallucinating data.
  */
 
-const pdfParse = require('pdf-parse');
+let pdfParse;
+try {
+  pdfParse = require('pdf-parse');
+} catch (e) {
+  pdfParse = null;
+}
 const skillExtractionService = require('./skillExtractionService');
 const skillNormalizer = require('./skillNormalizationService');
 

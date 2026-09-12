@@ -8,12 +8,16 @@ const saveUserSkills = async (userId, skillsArray) => {
   
   for (const skill of skillsArray) {
     if (typeof skill === 'string' && skill.trim()) {
-      await db.query(
-        `INSERT INTO user_skills (user_id, skill_name)
-         VALUES ($1, $2)
-         ON CONFLICT (user_id, skill_name) DO NOTHING`,
-        [userId, skill.trim()]
-      );
+      try {
+        await db.query(
+          `INSERT INTO user_skills (user_id, skill_name)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id, skill_name) DO NOTHING`,
+          [userId, skill.trim()]
+        );
+      } catch (err) {
+        console.warn('saveUserSkills DB query notice:', err.message);
+      }
     }
   }
 };
@@ -22,11 +26,16 @@ const saveUserSkills = async (userId, skillsArray) => {
  * Retrieve saved skills for a user from PostgreSQL
  */
 const getUserSkills = async (userId) => {
-  const result = await db.query(
-    `SELECT skill_name FROM user_skills WHERE user_id = $1 ORDER BY skill_name ASC`,
-    [userId]
-  );
-  return result.rows.map((row) => row.skill_name);
+  try {
+    const result = await db.query(
+      `SELECT skill_name FROM user_skills WHERE user_id = $1 ORDER BY skill_name ASC`,
+      [userId]
+    );
+    return result.rows ? result.rows.map((row) => row.skill_name) : [];
+  } catch (err) {
+    console.warn('getUserSkills DB query notice:', err.message);
+    return [];
+  }
 };
 
 module.exports = {
