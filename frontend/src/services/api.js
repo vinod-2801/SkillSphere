@@ -12,6 +12,19 @@ const STORAGE_KEYS = {
 
 const getScopedKey = (base, userId) => `${base}_${userId}`;
 
+const formatRole = (rawRole, fallbackRole = 'Student') => {
+  const r = rawRole || fallbackRole;
+  if (!r) return 'Student';
+  const lower = String(r).toLowerCase().trim();
+  if (lower === 'student') return 'Student';
+  if (lower === 'industry') return 'Industry';
+  if (lower === 'academician') return 'Academician';
+  if (lower === 'institution' || lower === 'institution_admin' || lower === 'institution admin') return 'Institution';
+  if (lower === 'platform_admin' || lower === 'platform admin' || lower === 'admin') return 'Platform Admin';
+  return r;
+};
+
+
 // Platform Mock Datasets (Platform Content, NOT logged-in user accounts)
 export const initialOpportunities = [
   {
@@ -295,11 +308,13 @@ export const api = {
         localStorage.setItem('skillsphere_token', token);
 
         const userId = backendUser.id || `usr_${Date.now()}`;
+        const userRole = formatRole(backendUser.role, role);
+
         const sessionUser = {
           id: userId,
           name: backendUser.name || name,
           email: backendUser.email || email,
-          role: role,
+          role: userRole,
           institution: institution,
           isLoggedIn: true,
           token: token,
@@ -311,14 +326,24 @@ export const api = {
 
         // Maintain user list in mock storage for offline list views
         const registeredUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-        if (!registeredUsers.some((u) => u.email === email)) {
+        const existingIdx = registeredUsers.findIndex((u) => u.email === email);
+        if (existingIdx >= 0) {
+          registeredUsers[existingIdx] = { ...registeredUsers[existingIdx], ...sessionUser, password };
+        } else {
           registeredUsers.push({ ...sessionUser, password });
-          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registeredUsers));
         }
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registeredUsers));
 
-        // Ensure user profile exists
+        // Ensure user profile exists & keeps matching role
         const profileKey = getScopedKey('skillsphere_profile', userId);
-        if (!localStorage.getItem(profileKey)) {
+        const existingProfile = localStorage.getItem(profileKey);
+        if (existingProfile) {
+          try {
+            const parsedProfile = JSON.parse(existingProfile);
+            parsedProfile.role = userRole;
+            localStorage.setItem(profileKey, JSON.stringify(parsedProfile));
+          } catch (e) {}
+        } else {
           const userProfile = {
             id: userId,
             name: sessionUser.name,
@@ -378,46 +403,84 @@ export const api = {
   },
 
   getProfile: async () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const currentUser = api.getCurrentUser();
-        if (!currentUser || !currentUser.isLoggedIn) {
-          resolve(null);
-          return;
+    const currentUser = api.getCurrentUser();
+    if (!currentUser || !currentUser.isLoggedIn) {
+      return null;
+    }
+
+    const profileKey = getScopedKey('skillsphere_profile', currentUser.id);
+    const data = localStorage.getItem(profileKey);
+    let profileData;
+
+    if (data) {
+      try {
+        profileData = JSON.parse(data);
+      } catch {
+        profileData = {};
+      }
+    } else {
+      profileData = {
+        id: currentUser.id,
+        name: currentUser.name,
+        email: currentUser.email,
+        role: currentUser.role,
+        institution: currentUser.institution || 'SkillSphere Network',
+        degree: currentUser.role === 'Student' ? 'Undergraduate Candidate' : 'Professional',
+        gradYear: '2026',
+        cgpa: 'N/A',
+        location: 'India',
+        preferredType: 'Internship & Full-time',
+        preferredLocation: 'Remote / Hybrid',
+        bio: 'SkillSphere Member',
+        employabilityScore: null,
+        skills: [],
+        uploadedResumeName: null,
+        missingSkills: [],
+        careerInterests: [],
+      };
+    }
+
+    // Attempt to sync and fetch latest profile and saved resume from backend
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (currentUser ? currentUser.token : '') ||
+      '';
+
+    if (token) {
+      try {
+        const beRes = await fetch('http://localhost:5000/api/users/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (beRes.ok) {
+          const beJson = await beRes.json();
+          const beUser = beJson.data || {};
+
+          if (beUser.uploadedResumeName) {
+            profileData.uploadedResumeName = beUser.uploadedResumeName;
+          }
+          if (beUser.resumeId) {
+            profileData.resumeId = beUser.resumeId;
+          }
+          if (beUser.employabilityScore !== null && beUser.employabilityScore !== undefined) {
+            profileData.employabilityScore = beUser.employabilityScore;
+          }
+          if (Array.isArray(beUser.skills) && beUser.skills.length > 0) {
+            // Merge skills
+            profileData.skills = beUser.skills.map((s) =>
+              typeof s === 'string'
+                ? { name: s, category: 'Technical Skill', verified: true }
+                : s
+            );
+          }
         }
+      } catch (err) {
+        // Fall back gracefully to localStorage profileData
+      }
+    }
 
-        const profileKey = getScopedKey('skillsphere_profile', currentUser.id);
-        const data = localStorage.getItem(profileKey);
-        let profileData;
-
-        if (data) {
-          profileData = JSON.parse(data);
-        } else {
-          profileData = {
-            id: currentUser.id,
-            name: currentUser.name,
-            email: currentUser.email,
-            role: currentUser.role,
-            institution: currentUser.institution || 'SkillSphere Network',
-            degree: currentUser.role === 'Student' ? 'Undergraduate Candidate' : 'Professional',
-            gradYear: '2026',
-            cgpa: 'N/A',
-            location: 'India',
-            preferredType: 'Internship & Full-time',
-            preferredLocation: 'Remote / Hybrid',
-            bio: 'SkillSphere Member',
-            employabilityScore: null,
-            skills: [],
-            uploadedResumeName: null,
-            missingSkills: [],
-            careerInterests: [],
-          };
-          localStorage.setItem(profileKey, JSON.stringify(profileData));
-        }
-
-        resolve(profileData);
-      }, 150);
-    });
+    localStorage.setItem(profileKey, JSON.stringify(profileData));
+    return profileData;
   },
 
   updateProfile: async (updatedData) => {
@@ -442,11 +505,51 @@ export const api = {
         localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(currentUser));
 
         resolve({ success: true, profile: merged });
-      }, 300);
+      }, 150);
     });
   },
 
-  analyzeResumeText: async (text) => {
+  getMyResume: async () => {
+    const currentUser = api.getCurrentUser();
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (currentUser ? currentUser.token : '') ||
+      '';
+
+    if (!token) {
+      const profileKey = getScopedKey('skillsphere_profile', currentUser?.id);
+      const data = localStorage.getItem(profileKey);
+      if (data) {
+        try {
+          const prof = JSON.parse(data);
+          return {
+            hasResume: Boolean(prof.uploadedResumeName),
+            resume: prof.uploadedResumeName ? { fileName: prof.uploadedResumeName, employabilityScore: prof.employabilityScore } : null,
+            skills: prof.skills || [],
+            employabilityScore: prof.employabilityScore,
+          };
+        } catch {}
+      }
+      return { hasResume: false, resume: null, skills: [], employabilityScore: null };
+    }
+
+    try {
+      const response = await fetch('http://localhost:5000/api/resumes/my-resume', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const resJson = await response.json();
+        return resJson.data || resJson;
+      }
+    } catch (err) {
+      console.warn('getMyResume notice:', err.message);
+    }
+
+    return { hasResume: false, resume: null, skills: [], employabilityScore: null };
+  },
+
+  analyzeResumeText: async (text, fileName = 'resume.pdf') => {
     let token =
       localStorage.getItem('token') ||
       localStorage.getItem('skillsphere_token') ||
@@ -476,14 +579,195 @@ export const api = {
         'Content-Type': 'application/json',
         Authorization: token ? `Bearer ${token}` : '',
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, fileName }),
     });
 
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.message || 'Failed to analyze resume text');
     }
+
+    const resPayload = data.data || data;
+    const extractedSkills = Array.isArray(resPayload.extracted_skills)
+      ? resPayload.extracted_skills
+      : [];
+
+    // Immediately persist to local profile so it NEVER disappears across sections
+    await api.updateProfile({
+      uploadedResumeName: fileName || resPayload.file_name || 'Uploaded_Resume.pdf',
+      resumeId: resPayload.resume_id || null,
+      employabilityScore: resPayload.employability_score,
+      skills: extractedSkills.map((s) =>
+        typeof s === 'string'
+          ? { name: s, category: 'Technical Skill', verified: true }
+          : s
+      ),
+    });
+
     return data;
+  },
+
+  getEmployabilityScore: async (studentData) => {
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      '';
+
+    try {
+      const response = await fetch('http://localhost:5000/api/ai/employability-score', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ studentData }),
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        const scoreData = json.data || {};
+        if (typeof scoreData.score === 'number') {
+          await api.updateProfile({ employabilityScore: scoreData.score });
+        }
+        return scoreData;
+      }
+    } catch (err) {
+      console.warn('getEmployabilityScore notice:', err.message);
+    }
+    return null;
+  },
+
+  getCareerRoadmap: async (targetRole) => {
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (localStorage.getItem('skillsphere_current_user')
+        ? JSON.parse(localStorage.getItem('skillsphere_current_user')).token
+        : '') ||
+      '';
+
+    if (!token) {
+      const currentUser = api.getCurrentUser();
+      if (currentUser && currentUser.isLoggedIn && currentUser.email) {
+        const loginRes = await api.loginUser({
+          email: currentUser.email,
+          password: currentUser.password || 'password123',
+          role: currentUser.role || 'Student',
+          name: currentUser.name,
+        });
+        if (loginRes.success && loginRes.token) {
+          token = loginRes.token;
+        }
+      }
+    }
+
+    const response = await fetch('http://localhost:5000/api/ai/roadmap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({ targetRole }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to generate career roadmap');
+    }
+
+    const resultData = data.data || data;
+    // Cache roadmap locally for instant retrieval
+    const currentUser = api.getCurrentUser();
+    if (currentUser?.id) {
+      localStorage.setItem(getScopedKey('skillsphere_roadmap', currentUser.id), JSON.stringify(resultData));
+    }
+
+    return data;
+  },
+
+  getSavedCareerRoadmap: async () => {
+    const currentUser = api.getCurrentUser();
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (currentUser ? currentUser.token : '') ||
+      '';
+
+    if (token) {
+      try {
+        const response = await fetch('http://localhost:5000/api/ai/roadmap/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const json = await response.json();
+          if (json.data) {
+            if (currentUser?.id) {
+              localStorage.setItem(getScopedKey('skillsphere_roadmap', currentUser.id), JSON.stringify(json.data));
+            }
+            return json.data;
+          }
+        }
+      } catch (err) {
+        console.warn('getSavedCareerRoadmap fetch notice:', err.message);
+      }
+    }
+
+    if (currentUser?.id) {
+      const stored = localStorage.getItem(getScopedKey('skillsphere_roadmap', currentUser.id));
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch {}
+      }
+    }
+    return null;
+  },
+
+  updateMilestoneStatus: async (milestoneId, status) => {
+    const currentUser = api.getCurrentUser();
+    let token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('skillsphere_token') ||
+      (currentUser ? currentUser.token : '') ||
+      '';
+
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/ai/roadmap/milestones/${milestoneId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        // Update local cache
+        if (currentUser?.id) {
+          const cacheKey = getScopedKey('skillsphere_roadmap', currentUser.id);
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed.milestones)) {
+              parsed.milestones = parsed.milestones.map((m) =>
+                m.id === milestoneId ? { ...m, status } : m
+              );
+              if (json.data && json.data.stats) {
+                parsed.stats = json.data.stats;
+              }
+              localStorage.setItem(cacheKey, JSON.stringify(parsed));
+            }
+          }
+        }
+        return json.data || json;
+      }
+    } catch (err) {
+      console.warn('updateMilestoneStatus notice:', err.message);
+    }
+    return null;
   },
 
   analyzeResume: async (fileName = 'resume.pdf') => {
@@ -608,35 +892,85 @@ export const api = {
   },
 
   submitApplication: async (appData) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const currentUser = api.getCurrentUser();
-        if (!currentUser || !currentUser.isLoggedIn) {
-          resolve({ success: false, error: 'Not logged in' });
-          return;
+    const currentUser = api.getCurrentUser();
+    if (!currentUser || !currentUser.isLoggedIn) {
+      return { success: false, error: 'Not logged in' };
+    }
+
+    // Require verified resume/skills before submitting application
+    if (!api.hasUserData()) {
+      return {
+        success: false,
+        error: 'Please upload and verify your resume before applying.',
+      };
+    }
+
+    const profileKey = getScopedKey('skillsphere_profile', currentUser.id);
+    const profile = JSON.parse(localStorage.getItem(profileKey) || '{}');
+    const token = localStorage.getItem('token') || localStorage.getItem('skillsphere_token') || currentUser.token || '';
+
+    let resumeName = appData.selectedResume || profile.uploadedResumeName || 'Verified_Student_CV.pdf';
+
+    // Map opportunity to job_id or internship_id
+    let jobId = null;
+    let internshipId = null;
+    if (appData.type === 'Internship' || (appData.opportunityId && String(appData.opportunityId).startsWith('opp_1'))) {
+      internshipId = 1;
+    } else if (appData.opportunityId) {
+      const num = parseInt(String(appData.opportunityId).replace(/\D/g, ''), 10);
+      jobId = isNaN(num) ? 1 : num;
+    } else {
+      jobId = 1;
+    }
+
+    // Submit to PostgreSQL backend if token available
+    if (token) {
+      try {
+        const beRes = await fetch('http://localhost:5000/api/applications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            job_id: jobId,
+            internship_id: internshipId,
+            resume_id: profile.resumeId || undefined,
+          }),
+        });
+
+        const beData = await beRes.json().catch(() => ({}));
+        if (!beRes.ok) {
+          if (beData.message && !beData.message.includes('already applied')) {
+            return { success: false, error: beData.message };
+          }
         }
+      } catch (err) {
+        console.warn('Backend application submit notice:', err.message);
+      }
+    }
 
-        const appKey = getScopedKey('skillsphere_applications', currentUser.id);
-        const userApps = JSON.parse(localStorage.getItem(appKey) || '[]');
+    // Store in application history
+    const appKey = getScopedKey('skillsphere_applications', currentUser.id);
+    const userApps = JSON.parse(localStorage.getItem(appKey) || '[]');
 
-        const newApp = {
-          id: `app_${Date.now()}`,
-          opportunityId: appData.opportunityId,
-          title: appData.opportunityTitle,
-          company: appData.company,
-          candidateName: currentUser.name,
-          submittedDate: new Date().toISOString().split('T')[0],
-          status: 'Applied',
-          matchPercentage: appData.matchPercentage || 89,
-          skills: appData.skills || ['Python', 'React'],
-          coverNote: appData.coverNote || '',
-        };
+    const newApp = {
+      id: `app_${Date.now()}`,
+      opportunityId: appData.opportunityId,
+      title: appData.opportunityTitle,
+      company: appData.company,
+      candidateName: currentUser.name,
+      attachedResume: resumeName,
+      submittedDate: new Date().toISOString().split('T')[0],
+      status: 'Applied',
+      matchPercentage: appData.matchPercentage || 89,
+      skills: profile.skills ? profile.skills.map((s) => (typeof s === 'string' ? s : s.name)) : ['Python', 'React'],
+      coverNote: appData.coverNote || '',
+    };
 
-        userApps.unshift(newApp);
-        localStorage.setItem(appKey, JSON.stringify(userApps));
-        resolve({ success: true, application: newApp });
-      }, 350);
-    });
+    userApps.unshift(newApp);
+    localStorage.setItem(appKey, JSON.stringify(userApps));
+    return { success: true, application: newApp };
   },
 
   getApplications: async () => {
@@ -950,3 +1284,5 @@ export const parseResumeApi = async (file) => {
     skillGap: result.skillGap || []
   };
 };
+
+export const getCareerRoadmapApi = api.getCareerRoadmap;

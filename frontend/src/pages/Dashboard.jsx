@@ -5,7 +5,9 @@ import Sidebar from '../components/Sidebar';
 import ScoreCard from '../components/ScoreCard';
 import Card from '../components/Card';
 import Button from '../components/Button';
+import CareerRoadmapCard from '../components/CareerRoadmapCard';
 import {
+
   IconFileText,
   IconCheckCircle,
   IconBriefcase,
@@ -156,6 +158,9 @@ function StudentDashboardView({ profile, opportunities, applications }) {
           ))}
         </div>
       </Card>
+
+      {/* Career Roadmap Generator */}
+      <CareerRoadmapCard />
     </div>
   );
 }

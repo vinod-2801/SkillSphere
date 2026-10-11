@@ -1,17 +1,36 @@
 const applicationModel = require('../models/applicationModel');
 const jobModel = require('../models/jobModel');
 const internshipModel = require('../models/internshipModel');
+const skillMatchModel = require('../models/skillMatchModel');
+const resumeModel = require('../models/resumeModel');
+const skillNormalizer = require('../../services/skillNormalizationService');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
 
 /**
  * POST /api/applications
- * Allows a student to apply for a job OR an internship
+ * Allows a student to apply for a job OR an internship using their saved verified resume.
+ * Server-side enforcement of:
+ * - Role authentication (Student only)
+ * - Resume ownership (verified against authenticated applicant)
+ * - Resume verification (valid parsed resume with extracted skills)
+ * - Eligibility (verified student skills matching target requirements)
  */
 const apply = async (req, res, next) => {
   try {
-    const { job_id, internship_id } = req.body;
+    const { job_id, internship_id, resume_id } = req.body;
 
-    // 1. Validation: Must provide either job_id OR internship_id, but not both and not neither
+    // 1. Role enforcement: Only students are eligible to apply
+    if (req.user.role !== 'student') {
+      return sendError(
+        res,
+        403,
+        'Forbidden: Only student accounts are eligible to submit candidate applications.'
+      );
+    }
+
+    const applicantId = req.user.id;
+
+    // 2. Validation: Must provide either job_id OR internship_id, but not both and not neither
     if ((!job_id && !internship_id) || (job_id && internship_id)) {
       return sendError(
         res,
@@ -30,23 +49,75 @@ const apply = async (req, res, next) => {
       return sendError(res, 400, 'Validation Error: Invalid internship_id');
     }
 
-    // 2. applicant_id comes strictly from JWT payload (req.user.id)
-    const applicantId = req.user.id;
+    // 3. Resume Ownership & Verification Check:
+    // If resume_id passed, verify the student strictly owns it.
+    // If not passed, reuse the student's saved verified resume automatically.
+    let studentResume = null;
+    if (resume_id) {
+      studentResume = await resumeModel.getResumeById(resume_id, applicantId);
+      if (!studentResume) {
+        return sendError(
+          res,
+          403,
+          'Unauthorized: The specified resume does not exist or does not belong to your account.'
+        );
+      }
+    } else {
+      studentResume = await resumeModel.getLatestResumeByUserId(applicantId);
+    }
 
-    // 3. Verify target position exists in database
+    if (!studentResume) {
+      return sendError(
+        res,
+        400,
+        'Eligibility Error: Please upload and verify your resume before applying.'
+      );
+    }
+
+    // 4. Verification Check: Student must have verified skills
+    const userSkills = await skillMatchModel.getUserSkills(applicantId);
+    if (!userSkills || userSkills.length === 0) {
+      return sendError(
+        res,
+        400,
+        'Eligibility Error: Please complete resume analysis to verify your skills before applying.'
+      );
+    }
+
+    // 5. Verify target position exists and check eligibility
+    let targetListing = null;
     if (jobId) {
-      const job = await jobModel.getJobById(jobId);
-      if (!job) {
-        return sendError(res, 404, 'Job not found');
+      targetListing = await jobModel.getJobById(jobId);
+      if (!targetListing) {
+        return sendError(res, 404, 'Job posting not found');
       }
     } else if (internshipId) {
-      const internship = await internshipModel.getInternshipById(internshipId);
-      if (!internship) {
-        return sendError(res, 404, 'Internship not found');
+      targetListing = await internshipModel.getInternshipById(internshipId);
+      if (!targetListing) {
+        return sendError(res, 404, 'Internship posting not found');
       }
     }
 
-    // 4. Prevent duplicate application
+    // Eligibility check against required skills
+    if (targetListing && Array.isArray(targetListing.required_skills) && targetListing.required_skills.length > 0) {
+      const normalizedUserSkills = skillNormalizer.normalizeSkills(userSkills);
+      const normalizedRequired = skillNormalizer.normalizeSkills(targetListing.required_skills);
+
+      const matched = normalizedRequired.filter((reqSkill) =>
+        normalizedUserSkills.includes(reqSkill)
+      );
+
+      // If position has required skills, student must possess at least 1 verified match
+      if (matched.length === 0 && normalizedRequired.length > 0) {
+        return sendError(
+          res,
+          400,
+          `Eligibility Notice: Your verified skills do not meet the core prerequisites for ${targetListing.title}. Required skills include: ${targetListing.required_skills.slice(0, 3).join(', ')}.`
+        );
+      }
+    }
+
+    // 6. Prevent duplicate application
     const existingApplication = await applicationModel.findApplication(applicantId, {
       jobId,
       internshipId,
@@ -56,14 +127,22 @@ const apply = async (req, res, next) => {
       return sendError(res, 409, 'Application Error: You have already applied for this position');
     }
 
-    // 5. Store application in PostgreSQL
+    // 7. Store application in PostgreSQL with attached verified resume
     const newApplication = await applicationModel.createApplication({
       applicantId,
       jobId,
       internshipId,
+      resumeId: studentResume.id,
     });
 
-    return sendSuccess(res, 201, 'Application submitted successfully', newApplication);
+    return sendSuccess(res, 201, 'Application submitted successfully with verified resume', {
+      ...newApplication,
+      attached_resume: {
+        id: studentResume.id,
+        file_name: studentResume.file_name,
+        employability_score: studentResume.employability_score,
+      },
+    });
   } catch (error) {
     next(error);
   }

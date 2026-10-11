@@ -14,6 +14,12 @@ async function startServer() {
   if (db && db.initDb) {
     await db.initDb();
   }
+  try {
+    const { runMigration } = require('./src/config/migrate');
+    await runMigration();
+  } catch (mErr) {
+    console.warn('Migration check notice:', mErr.message);
+  }
   app.listen(PORT, () => {
     console.log(`===================================================`);
     console.log(`🚀 SkillSphere Backend API running on http://localhost:${PORT}`);

@@ -8,7 +8,8 @@ import {
   IconCheckCircle,
   IconFileText,
   IconFolder,
-  IconChevronRight
+  IconChevronRight,
+  IconAlertCircle,
 } from '../components/Icons';
 
 export default function Apply() {
@@ -29,25 +30,41 @@ export default function Apply() {
 
   useEffect(() => {
     async function loadData() {
-      const [opp, prof] = await Promise.all([
+      const [opp, prof, resumeData] = await Promise.all([
         api.getOpportunityById(id || 'opp_1'),
         api.getProfile(),
+        api.getMyResume(),
       ]);
       setOpportunity(opp);
       setProfile(prof);
-      if (prof && prof.name) {
-        setSelectedResume(`${prof.name.replace(/\s+/g, '_')}_CV_2026.pdf (Verified)`);
-      }
+
+      const actualResume =
+        resumeData?.resume?.fileName ||
+        prof?.uploadedResumeName ||
+        (prof?.name ? `${prof.name.replace(/\s+/g, '_')}_Verified_CV.pdf` : 'Candidate_Resume.pdf');
+
+      setSelectedResume(`${actualResume} (Verified)`);
       setLoading(false);
     }
     loadData();
   }, [id]);
 
+  const [error, setError] = useState('');
+
+  const hasVerifiedResume = api.hasUserData();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+
+    if (!hasVerifiedResume) {
+      setError('Please upload and verify your resume before applying.');
+      return;
+    }
+
     setSubmitting(true);
 
-    await api.submitApplication({
+    const res = await api.submitApplication({
       opportunityId: opportunity.id,
       opportunityTitle: opportunity.title,
       company: opportunity.company,
@@ -56,7 +73,12 @@ export default function Apply() {
     });
 
     setSubmitting(false);
-    setSubmitted(true);
+
+    if (res && res.success === false) {
+      setError(res.error || 'Please upload and verify your resume before applying.');
+    } else {
+      setSubmitted(true);
+    }
   };
 
   if (loading || !opportunity || !profile) {
@@ -175,6 +197,31 @@ export default function Apply() {
               </div>
             </Card>
 
+            {!hasVerifiedResume && (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+                <div className="flex items-center gap-2.5">
+                  <IconAlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-bold">Resume Verification Required</p>
+                    <p className="text-amber-800 mt-0.5">Please upload and verify your resume before applying.</p>
+                  </div>
+                </div>
+                <Link to="/resume">
+                  <Button size="sm" variant="primary" className="gap-1.5 flex-shrink-0">
+                    <IconFileText className="w-4 h-4" />
+                    <span>Upload & Verify Resume</span>
+                  </Button>
+                </Link>
+              </div>
+            )}
+
+            {error && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 flex items-center gap-2.5 text-xs text-red-800 font-medium">
+                <IconAlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Document Attachments */}
               <Card title="Application Attachments" subtitle="Select verified documents to include">
@@ -220,8 +267,15 @@ export default function Apply() {
                 </div>
               </Card>
 
-              <Button type="submit" size="lg" variant="primary" fullWidth loading={submitting}>
-                Submit Application Now
+              <Button
+                type="submit"
+                size="lg"
+                variant="primary"
+                fullWidth
+                loading={submitting}
+                disabled={submitting || !hasVerifiedResume}
+              >
+                {hasVerifiedResume ? 'Submit Application Now' : 'Verify Resume to Enable Submission'}
               </Button>
             </form>
           </div>

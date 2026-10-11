@@ -25,8 +25,34 @@ export default function Resume() {
   useEffect(() => {
     async function loadData() {
       try {
-        const data = await api.getProfile();
+        const [data, resumeData] = await Promise.all([
+          api.getProfile(),
+          api.getMyResume(),
+        ]);
         setProfile(data);
+
+        // Restore persisted resume and skills if already saved
+        const hasSavedResume = Boolean(resumeData?.resume || data?.uploadedResumeName);
+        const savedSkills = (resumeData?.skills && resumeData.skills.length > 0)
+          ? resumeData.skills
+          : (data?.skills || []);
+
+        if (hasSavedResume || savedSkills.length > 0) {
+          const formattedSkills = savedSkills.map((skill) =>
+            typeof skill === 'string'
+              ? { name: skill, category: 'Technical Skill', verified: true }
+              : skill
+          );
+          const score = resumeData?.employabilityScore ?? data?.employabilityScore ?? null;
+
+          setAnalysisResult({
+            extractedSkills: formattedSkills,
+            employabilityScore: score,
+            skillCount: formattedSkills.length,
+            explanation: `Retrieved ${formattedSkills.length} verified technical skill credentials from your saved resume profile.`
+          });
+          setAnalysisState('complete');
+        }
       } catch (error) {
         console.error('Failed to load profile:', error);
       }
@@ -107,10 +133,6 @@ export default function Resume() {
       const parsedResponse = await parseResponse.json();
       const parsedData = parsedResponse.data || parsedResponse;
 
-      /*
-       * Different backend versions may use different names
-       * for the extracted text, so check the common possibilities.
-       */
       const extractedText =
         parsedData.text ||
         parsedData.extractedText ||
@@ -131,40 +153,46 @@ export default function Resume() {
 
       /*
        * STEP 2
-       * Send extracted resume text to the existing
-       * resume analysis API.
+       * Send extracted resume text and file name to the existing
+       * resume analysis API which permanently persists it to PostgreSQL.
        */
-      const res = await api.analyzeResumeText(extractedText);
+      const res = await api.analyzeResumeText(extractedText, file.name);
       const apiData = res.data || {};
 
       const extractedSkills = Array.isArray(apiData.extracted_skills)
         ? apiData.extracted_skills
         : [];
 
+      const formattedSkills = extractedSkills.map((skill) => ({
+        name: skill,
+        category: 'Technical Skill',
+        verified: true
+      }));
+
       setAnalysisResult({
-        extractedSkills: extractedSkills.map((skill) => ({
-          name: skill,
-          category: 'Technical Skill',
-          verified: true
-        })),
-        employabilityScore:
-          apiData.employability_score ?? null,
-        skillCount:
-          apiData.skill_count ?? extractedSkills.length,
-        explanation:
-          apiData.explanation || ''
+        extractedSkills: formattedSkills,
+        employabilityScore: apiData.employability_score ?? null,
+        skillCount: apiData.skill_count ?? extractedSkills.length,
+        explanation: apiData.explanation || ''
       });
 
       setAnalysisState('complete');
 
       /*
-       * Update the local profile with the newly calculated score.
+       * Update the local profile and persist across sessions
        */
       if (profile) {
-        setProfile({
+        const updatedProf = {
           ...profile,
           employabilityScore: apiData.employability_score,
-          uploadedResumeName: file.name
+          uploadedResumeName: file.name,
+          skills: formattedSkills,
+        };
+        setProfile(updatedProf);
+        await api.updateProfile({
+          employabilityScore: apiData.employability_score,
+          uploadedResumeName: file.name,
+          skills: formattedSkills,
         });
       }
     } catch (err) {

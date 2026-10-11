@@ -111,11 +111,20 @@ export default function OpportunityCard({ opportunity }) {
           <IconChevronRight className="w-3.5 h-3.5" />
         </Link>
         {isStudent && (
-          <Link to={`/apply/${id}`}>
-            <Button size="sm" variant="primary">
-              Apply Now
-            </Button>
-          </Link>
+          hasUserData ? (
+            <Link to={`/apply/${id}`}>
+              <Button size="sm" variant="primary">
+                Apply Now
+              </Button>
+            </Link>
+          ) : (
+            <Link to="/resume" title="Please upload and verify your resume before applying.">
+              <Button size="sm" variant="outline" className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold gap-1">
+                <IconFileText className="w-3.5 h-3.5 text-amber-600" />
+                <span>Verify Resume to Apply</span>
+              </Button>
+            </Link>
+          )
         )}
       </div>
     </div>

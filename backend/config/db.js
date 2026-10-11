@@ -3,7 +3,11 @@
  * Supports PostgreSQL connection pool with seamless in-memory fallback for local demo.
  */
 
+const path = require('path');
 const { Pool } = require('pg');
+
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../../backend/.env') });
 
 let pool = null;
 let isPgConnected = false;
@@ -60,7 +64,9 @@ inMemoryStore.students.set(1, {
 
 async function initDb() {
   const connectionString = process.env.DATABASE_URL || (
-    process.env.PGHOST ? `postgres://${process.env.PGUSER || 'postgres'}:${process.env.PGPASSWORD || 'postgres'}@${process.env.PGHOST}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'skillsphere'}` : null
+    (process.env.DB_HOST || process.env.PGHOST)
+      ? `postgres://${process.env.DB_USER || process.env.PGUSER || 'postgres'}:${encodeURIComponent(process.env.DB_PASSWORD || process.env.PGPASSWORD || 'postgres')}@${process.env.DB_HOST || process.env.PGHOST || 'localhost'}:${process.env.DB_PORT || process.env.PGPORT || 5432}/${process.env.DB_NAME || process.env.PGDATABASE || 'SkillSphere'}`
+      : null
   );
 
   if (connectionString) {

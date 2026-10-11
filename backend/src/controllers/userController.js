@@ -1,13 +1,15 @@
 const userModel = require('../models/userModel');
+const resumeModel = require('../models/resumeModel');
+const skillMatchModel = require('../models/skillMatchModel');
+const employabilityModel = require('../models/employabilityModel');
 const { sendSuccess, sendError } = require('../utils/responseHandler');
 
 /**
  * GET /api/users/me
- * Returns profile of authenticated user from JWT
+ * Returns profile of authenticated user from JWT, enriched with saved resume & skills
  */
 const getMyProfile = async (req, res, next) => {
   try {
-    // User ID ALWAYS comes from req.user (populated by authMiddleware from JWT)
     const userId = req.user.id;
 
     const user = await userModel.findUserById(userId);
@@ -15,7 +17,21 @@ const getMyProfile = async (req, res, next) => {
       return sendError(res, 404, 'User profile not found');
     }
 
-    return sendSuccess(res, 200, 'User profile retrieved successfully', user);
+    // Retrieve saved skills, resume, and latest score
+    const skills = await skillMatchModel.getUserSkills(userId);
+    const resume = await resumeModel.getLatestResumeByUserId(userId);
+    const scoreRecord = await employabilityModel.getLatestScore(userId);
+
+    const enrichedUser = {
+      ...user,
+      skills: skills || [],
+      uploadedResumeName: resume ? resume.file_name : null,
+      resumeId: resume ? resume.id : null,
+      resumeUploadedAt: resume ? resume.uploaded_at : null,
+      employabilityScore: scoreRecord ? scoreRecord.score : (resume ? resume.employability_score : null),
+    };
+
+    return sendSuccess(res, 200, 'User profile retrieved successfully', enrichedUser);
   } catch (error) {
     next(error);
   }

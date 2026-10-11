@@ -26,6 +26,7 @@ app.get('/api/health', async (req, res) => {
     await db.query('SELECT 1');
     res.json({
       success: true,
+      status: 'online',
       message: 'SkillSphere Backend API is healthy and connected to PostgreSQL',
       timestamp: new Date().toISOString(),
     });

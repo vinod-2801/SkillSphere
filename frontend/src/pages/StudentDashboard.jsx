@@ -4,6 +4,7 @@ import ParsedResumeCard from '../components/ParsedResumeCard';
 import EmployabilityCard from '../components/EmployabilityCard';
 import SkillGapCard from '../components/SkillGapCard';
 import ExplainableMatchCard from '../components/ExplainableMatchCard';
+import CareerRoadmapCard from '../components/CareerRoadmapCard';
 import {
   getStudentProfileApi,
   getJobsApi,
@@ -165,6 +166,9 @@ export default function StudentDashboard() {
           jobTitle={selectedJob?.title}
         />
       </div>
+
+      {/* Career Roadmap Generator */}
+      <CareerRoadmapCard initialRole={selectedJob?.title || ''} />
     </div>
   );
 }

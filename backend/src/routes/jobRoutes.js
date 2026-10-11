@@ -11,13 +11,13 @@ const skillMatchController = require('../controllers/skillMatchController');
 // 1. Create a Job - Only 'industry' role allowed
 router.post('/', verifyToken, requireRole('industry'), jobController.createJob);
 
-// 2. Get All Jobs - Any authenticated user
-router.get('/', verifyToken, jobController.getAllJobs);
+// 2. Get All Jobs - Publicly accessible for listing & browsing
+router.get('/', jobController.getAllJobs);
 
 // 3. Get Job Skill Match Breakdown - Only 'student' role allowed
 router.get('/:id/match', verifyToken, requireRole('student'), skillMatchController.getJobSkillMatch);
 
-// 4. Get Single Job by ID - Any authenticated user
-router.get('/:id', verifyToken, jobController.getJobById);
+// 4. Get Single Job by ID
+router.get('/:id', jobController.getJobById);
 
 module.exports = router;
