@@ -6,18 +6,98 @@ import Button from '../components/Button';
 import SkillBadge from '../components/SkillBadge';
 import { IconUser } from '../components/Icons';
 
+const normalizeProfile = (data = {}) => ({
+  id: data.id || '',
+  name: data.name || '',
+  email: data.email || '',
+  role: data.role || 'Student',
+  bio: data.bio || data.about || '',
+  about: data.about || data.bio || '',
+  location: data.location || '',
+  institution: data.institution || '',
+  degree: data.degree || 'Undergraduate Candidate',
+  gradYear: data.gradYear || data.graduation_year || '2026',
+  cgpa: data.cgpa || 'N/A',
+  preferredType: data.preferredType || data.preferred_job_type || 'Internship & Full-time',
+  preferredLocation: data.preferredLocation || data.preferred_location || 'Remote / Hybrid',
+  careerInterests: Array.isArray(data.careerInterests) ? data.careerInterests : [],
+  skills: Array.isArray(data.skills)
+    ? data.skills.map((s) => {
+        if (typeof s === 'string') {
+          return {
+            name: s,
+            skill_name: s,
+            source_type: 'Student-Declared',
+            verification_status: 'Unverified',
+            verified: false,
+            level: 'Intermediate',
+          };
+        }
+
+        const status = s.verification_status || s.verificationStatus || s.status || 'Unverified';
+        const source = s.source_type || s.sourceType || s.source || 'Student-Declared';
+        return {
+          ...s,
+          name: s.name || s.skill_name || '',
+          skill_name: s.skill_name || s.name || '',
+          verification_status: status,
+          verificationStatus: status,
+          source_type: source,
+          sourceType: source,
+          verified: String(status) === 'Verified',
+          level: s.level || 'Intermediate',
+        };
+      })
+    : [],
+  headline: data.headline || '',
+  preferredRole: data.preferredRole || data.preferred_role || '',
+  department: data.department || '',
+  profileVisibility: data.profileVisibility || data.profile_visibility || 'private',
+});
+
 export default function Profile() {
   const [profile, setProfile] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({});
   const [saving, setSaving] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [skillDraft, setSkillDraft] = useState('');
+  const [editingSkillId, setEditingSkillId] = useState(null);
+  const [skillSaving, setSkillSaving] = useState(false);
 
   useEffect(() => {
     async function loadProf() {
-      const data = await api.getProfile();
-      setProfile(data);
-      setFormData(data);
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('skillsphere_token') || '';
+
+        if (!token) {
+          const fallback = await api.getProfile();
+          const normalized = normalizeProfile(fallback);
+          setProfile(normalized);
+          setFormData(normalized);
+          return;
+        }
+
+        const response = await fetch('http://localhost:5000/api/users/me', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load profile');
+        }
+
+        const json = await response.json();
+        const normalized = normalizeProfile(json.data || {});
+        setProfile(normalized);
+        setFormData(normalized);
+      } catch (error) {
+        const fallback = await api.getProfile();
+        const normalized = normalizeProfile(fallback);
+        setProfile(normalized);
+        setFormData(normalized);
+      }
     }
     loadProf();
   }, []);
@@ -29,12 +109,87 @@ export default function Profile() {
 
   const handleSave = async () => {
     setSaving(true);
-    const res = await api.updateProfile(formData);
-    if (res.success) {
-      setProfile(res.profile);
+
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('skillsphere_token') || '';
+      const payload = {
+        name: formData.name || profile.name,
+        headline: formData.headline || '',
+        about: formData.about || formData.bio || '',
+        bio: formData.bio || formData.about || '',
+        location: formData.location || '',
+        institution: formData.institution || '',
+        department: formData.department || '',
+        degree: formData.degree || '',
+        graduationYear: formData.gradYear || '',
+        cgpa: formData.cgpa || '',
+        preferredRole: formData.preferredRole || '',
+        preferredJobType: formData.preferredType || '',
+        preferredLocation: formData.preferredLocation || '',
+        profileVisibility: formData.profileVisibility || 'private',
+      };
+
+      const response = await fetch('http://localhost:5000/api/users/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(json.message || 'Unable to save profile');
+      }
+
+      const normalized = normalizeProfile(json.data || {});
+      setProfile(normalized);
+      setFormData(normalized);
       setIsEditing(false);
+    } catch (error) {
+      const res = await api.updateProfile(formData);
+      if (res.success) {
+        setProfile(res.profile);
+      }
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
+  };
+
+  const handleSkillSubmit = async (e) => {
+    e.preventDefault();
+    const trimmed = skillDraft.trim();
+    if (!trimmed) return;
+
+    setSkillSaving(true);
+    let result;
+    if (editingSkillId) {
+      result = await api.updateSkill(editingSkillId, trimmed);
+    } else {
+      result = await api.addSkill(trimmed);
+    }
+
+    if (result.success) {
+      const refreshed = await api.getProfile();
+      const normalized = normalizeProfile(refreshed || {});
+      setProfile(normalized);
+      setFormData(normalized);
+      setSkillDraft('');
+      setEditingSkillId(null);
+    }
+
+    setSkillSaving(false);
+  };
+
+  const handleSkillDelete = async (skillId) => {
+    const result = await api.deleteSkill(skillId);
+    if (result.success) {
+      const refreshed = await api.getProfile();
+      const normalized = normalizeProfile(refreshed || {});
+      setProfile(normalized);
+      setFormData(normalized);
+    }
   };
 
   if (!profile) return null;
@@ -182,11 +337,75 @@ export default function Profile() {
             </Card>
 
             {/* Skills Overview */}
-            <Card title="Skills Portfolio" subtitle="Extracted and verified skills">
+            <Card title="Skills" subtitle="Add, edit, or remove skills. Resume-extracted skills stay visible alongside manual entries.">
+              <form onSubmit={handleSkillSubmit} className="mb-4 flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={skillDraft}
+                  onChange={(e) => setSkillDraft(e.target.value)}
+                  placeholder="Enter a skill"
+                  className="flex-1 px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  className="rounded-xl bg-blue-600 text-white px-4 py-2 text-xs font-bold disabled:opacity-60"
+                  disabled={skillSaving}
+                >
+                  {skillSaving ? 'Saving...' : editingSkillId ? 'Update Skill' : 'Add Skill'}
+                </button>
+                {editingSkillId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingSkillId(null);
+                      setSkillDraft('');
+                    }}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </form>
+
               <div className="flex flex-wrap gap-2">
-                {profile.skills.map((s, idx) => (
-                  <SkillBadge key={idx} name={s.name} verified={s.verified} level={s.level} />
-                ))}
+                {profile.skills.map((s, idx) => {
+                  const skillName = s.name || s.skill_name || '';
+                  const source = s.source_type || s.sourceType || s.source || 'Student-Declared';
+                  const status = s.verification_status || s.verificationStatus || s.status || 'Unverified';
+                  const isVerified = String(status) === 'Verified';
+
+                  return (
+                    <div key={s.id || s.skill_name || s.name || idx} className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
+                      <SkillBadge
+                        name={skillName}
+                        verified={isVerified}
+                        status={status}
+                        source={source}
+                        level={s.level}
+                      />
+                      <span className="text-[9px] uppercase tracking-[0.12em] text-slate-500">
+                        {source === 'Resume-Extracted' ? 'Resume' : 'Student'} • {isVerified ? 'Verified' : 'Unverified'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSkillId(s.id);
+                          setSkillDraft(skillName);
+                        }}
+                        className="text-[10px] font-bold text-blue-700"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSkillDelete(s.id)}
+                        className="text-[10px] font-bold text-rose-600"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </Card>
           </div>

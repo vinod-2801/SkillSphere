@@ -24,16 +24,21 @@ const analyzeResumeText = async (req, res, next) => {
     // 3. Keyword-based NLP extraction & dynamic score calculation
     const { extractedSkills, skillCount, employabilityScore, explanation } = extractSkillsAndScore(text);
 
-    // 4. Persist extracted skills to user_skills table in PostgreSQL
-    await skillMatchModel.saveUserSkills(userId, extractedSkills);
-
-    // 5. Persist resume document metadata and raw text in resumes table
+    // 4. Persist resume document metadata and raw text in resumes table
     const savedResume = await resumeModel.saveResume({
       userId,
       fileName: fileName || 'Uploaded_Resume.pdf',
       rawText: text,
       parsedSkills: extractedSkills,
       employabilityScore,
+    });
+
+    // 5. Persist extracted skills as Resume-Extracted and Unverified metadata in PostgreSQL.
+    await skillMatchModel.saveUserSkills(userId, extractedSkills, {
+      sourceType: 'Resume-Extracted',
+      verificationStatus: 'Unverified',
+      evidenceType: 'resume_analysis',
+      evidenceRef: String(savedResume.id),
     });
 
     // 6. Persist employability score in employability_scores table
@@ -73,10 +78,10 @@ const getMyResume = async (req, res, next) => {
     const userId = req.user.id;
 
     const resume = await resumeModel.getLatestResumeByUserId(userId);
-    const skills = await skillMatchModel.getUserSkills(userId);
+    const skillRecords = await skillMatchModel.getUserSkillRecords(userId);
     const scoreRecord = await employabilityModel.getLatestScore(userId);
 
-    if (!resume && (!skills || skills.length === 0)) {
+    if (!resume && (!skillRecords || skillRecords.length === 0)) {
       return sendSuccess(res, 200, 'No resume uploaded yet', {
         hasResume: false,
         resume: null,
@@ -85,7 +90,18 @@ const getMyResume = async (req, res, next) => {
       });
     }
 
-    return sendSuccess(res, 200, 'Saved resume and verified skills retrieved successfully', {
+    const skillPayload = (skillRecords || []).map((skill) => ({
+      id: skill.id,
+      name: skill.skill_name,
+      skill_name: skill.skill_name,
+      sourceType: skill.source_type || 'Resume-Extracted',
+      source_type: skill.source_type || 'Resume-Extracted',
+      verificationStatus: skill.verification_status || 'Unverified',
+      verification_status: skill.verification_status || 'Unverified',
+      verified: String(skill.verification_status || 'Unverified') === 'Verified',
+    }));
+
+    return sendSuccess(res, 200, 'Saved resume and extracted skills retrieved successfully', {
       hasResume: Boolean(resume),
       resume: resume
         ? {
@@ -98,7 +114,7 @@ const getMyResume = async (req, res, next) => {
             uploadedAt: resume.uploaded_at,
           }
         : null,
-      skills: skills || [],
+      skills: skillPayload,
       employabilityScore: scoreRecord ? scoreRecord.score : (resume ? resume.employability_score : null),
     });
   } catch (error) {

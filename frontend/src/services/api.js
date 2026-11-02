@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
 };
 
 const getScopedKey = (base, userId) => `${base}_${userId}`;
+const getAuthToken = () => localStorage.getItem('token') || localStorage.getItem('skillsphere_token') || '';
 
 const formatRole = (rawRole, fallbackRole = 'Student') => {
   const r = rawRole || fallbackRole;
@@ -440,12 +441,7 @@ export const api = {
       };
     }
 
-    // Attempt to sync and fetch latest profile and saved resume from backend
-    let token =
-      localStorage.getItem('token') ||
-      localStorage.getItem('skillsphere_token') ||
-      (currentUser ? currentUser.token : '') ||
-      '';
+    const token = getAuthToken();
 
     if (token) {
       try {
@@ -456,23 +452,47 @@ export const api = {
           const beJson = await beRes.json();
           const beUser = beJson.data || {};
 
-          if (beUser.uploadedResumeName) {
-            profileData.uploadedResumeName = beUser.uploadedResumeName;
-          }
-          if (beUser.resumeId) {
-            profileData.resumeId = beUser.resumeId;
-          }
-          if (beUser.employabilityScore !== null && beUser.employabilityScore !== undefined) {
-            profileData.employabilityScore = beUser.employabilityScore;
-          }
-          if (Array.isArray(beUser.skills) && beUser.skills.length > 0) {
-            // Merge skills
-            profileData.skills = beUser.skills.map((s) =>
-              typeof s === 'string'
-                ? { name: s, category: 'Technical Skill', verified: true }
-                : s
-            );
-          }
+          profileData = {
+            ...profileData,
+            ...beUser,
+            id: beUser.id || currentUser.id,
+            name: beUser.name || profileData.name,
+            email: beUser.email || profileData.email,
+            role: beUser.role || profileData.role,
+            institution: beUser.institution || profileData.institution,
+            degree: beUser.degree || profileData.degree,
+            gradYear: beUser.gradYear || beUser.graduation_year || profileData.gradYear,
+            cgpa: beUser.cgpa || profileData.cgpa,
+            location: beUser.location || profileData.location,
+            preferredType: beUser.preferredType || beUser.preferred_job_type || profileData.preferredType,
+            preferredLocation: beUser.preferredLocation || beUser.preferred_location || profileData.preferredLocation,
+            bio: beUser.bio || beUser.about || profileData.bio,
+            employabilityScore: beUser.employabilityScore ?? profileData.employabilityScore,
+            skills: Array.isArray(beUser.skills) && beUser.skills.length > 0
+              ? beUser.skills.map((s) => {
+                  if (typeof s === 'string') {
+                    return {
+                      name: s,
+                      skill_name: s,
+                      source_type: 'Student-Declared',
+                      verification_status: 'Unverified',
+                      verified: false,
+                      level: 'Intermediate',
+                    };
+                  }
+
+                  const status = s.verification_status || s.verificationStatus || s.status || 'Unverified';
+                  return {
+                    ...s,
+                    verified: String(status) === 'Verified',
+                    verification_status: status,
+                    verificationStatus: status,
+                    source_type: s.source_type || s.sourceType || s.source || 'Student-Declared',
+                  };
+                })
+              : profileData.skills || [],
+            projects: Array.isArray(beUser.projects) ? beUser.projects : profileData.projects || [],
+          };
         }
       } catch (err) {
         // Fall back gracefully to localStorage profileData
@@ -481,6 +501,89 @@ export const api = {
 
     localStorage.setItem(profileKey, JSON.stringify(profileData));
     return profileData;
+  },
+
+  getStudentSkills: async () => {
+    const token = getAuthToken();
+    if (!token) return [];
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/skills', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.message || 'Failed to load skills');
+      return Array.isArray(json.data) ? json.data : [];
+    } catch (err) {
+      return [];
+    }
+  },
+
+  addSkill: async (skillName) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/skills', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ skill_name: skillName }),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to add skill' };
+      }
+      return { success: true, skill: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  updateSkill: async (skillId, skillName) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const urlSkill = encodeURIComponent(String(skillId ?? ''));
+      const response = await fetch(`http://localhost:5000/api/users/skills/${urlSkill}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ skill_name: skillName }),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to update skill' };
+      }
+      return { success: true, skill: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteSkill: async (skillId) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const urlSkill = encodeURIComponent(String(skillId ?? ''));
+      const response = await fetch(`http://localhost:5000/api/users/skills/${urlSkill}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to delete skill' };
+      }
+      return { success: true, data: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   },
 
   updateProfile: async (updatedData) => {
@@ -597,11 +700,18 @@ export const api = {
       uploadedResumeName: fileName || resPayload.file_name || 'Uploaded_Resume.pdf',
       resumeId: resPayload.resume_id || null,
       employabilityScore: resPayload.employability_score,
-      skills: extractedSkills.map((s) =>
-        typeof s === 'string'
-          ? { name: s, category: 'Technical Skill', verified: true }
-          : s
-      ),
+      skills: extractedSkills.map((s) => {
+        const skillName = typeof s === 'string' ? s : (s.name || s.skill_name || '');
+        return {
+          name: skillName,
+          skill_name: skillName,
+          category: 'Technical Skill',
+          source_type: 'Resume-Extracted',
+          verification_status: 'Unverified',
+          verificationStatus: 'Unverified',
+          verified: false,
+        };
+      }),
     });
 
     return data;
@@ -780,11 +890,11 @@ export const api = {
         }
 
         const extractedSkills = [
-          { name: 'Python', category: 'Programming', verified: true, level: 'Advanced', issuer: 'Resume Analysis' },
-          { name: 'Java', category: 'Programming', verified: true, level: 'Intermediate', issuer: 'Resume Analysis' },
-          { name: 'SQL', category: 'Database', verified: true, level: 'Advanced', issuer: 'Resume Analysis' },
-          { name: 'React', category: 'Frontend', verified: true, level: 'Intermediate', issuer: 'Resume Analysis' },
-          { name: 'Git & GitHub', category: 'Tools', verified: true, level: 'Intermediate', issuer: 'Resume Analysis' },
+          { name: 'Python', category: 'Programming', source_type: 'Resume-Extracted', verification_status: 'Unverified', verified: false, level: 'Advanced', issuer: 'Resume Analysis' },
+          { name: 'Java', category: 'Programming', source_type: 'Resume-Extracted', verification_status: 'Unverified', verified: false, level: 'Intermediate', issuer: 'Resume Analysis' },
+          { name: 'SQL', category: 'Database', source_type: 'Resume-Extracted', verification_status: 'Unverified', verified: false, level: 'Advanced', issuer: 'Resume Analysis' },
+          { name: 'React', category: 'Frontend', source_type: 'Resume-Extracted', verification_status: 'Unverified', verified: false, level: 'Intermediate', issuer: 'Resume Analysis' },
+          { name: 'Git & GitHub', category: 'Tools', source_type: 'Resume-Extracted', verification_status: 'Unverified', verified: false, level: 'Intermediate', issuer: 'Resume Analysis' },
         ];
         const updatedScore = 85;
 
@@ -1014,34 +1124,159 @@ export const api = {
   },
 
   getCredentials: async () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const currentUser = api.getCurrentUser();
-        if (!currentUser || !currentUser.isLoggedIn) {
-          resolve([]);
-          return;
-        }
-        const profileKey = getScopedKey('skillsphere_profile', currentUser.id);
-        const prof = JSON.parse(localStorage.getItem(profileKey) || '{}');
-        const userSkills = prof.skills || [];
+    const token = getAuthToken();
+    if (!token) return [];
 
-        const creds = userSkills.map((s, idx) => ({
-          id: `cred_${idx + 1}`,
-          name: `${s.name || s} Certification & Outcome Assessment`,
-          issuer: s.issuer || 'Skill Development Program & Assessment',
-          skill: s.name || s,
-          date: 'Jan 2026',
-          status: 'Verified',
-          credentialId: `SKL-${(s.name || s).substring(0, 2).toUpperCase()}-${Math.floor(Math.random() * 899999 + 100000)}`,
-          verificationHash: `0x${Math.random().toString(16).substring(2, 10)}...41e8`,
-        }));
+    try {
+      const response = await fetch('http://localhost:5000/api/users/certifications', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.message || 'Failed to load certifications');
 
-        resolve(creds);
-      }, 150);
-    });
+      return Array.isArray(json.data)
+        ? json.data.map((cert) => ({
+            id: cert.id,
+            name: cert.certificateName || cert.certificate_name || 'Certification',
+            issuer: cert.issuingOrganization || cert.issuing_organization || 'Unknown issuer',
+            date: cert.issueDate || cert.issue_date || 'N/A',
+            expiryDate: cert.expiryDate || cert.expiry_date || null,
+            status: cert.status || 'Pending Verification',
+            credentialId: cert.credentialId || cert.credential_id || '',
+            credentialUrl: cert.credentialUrl || cert.credential_url || '',
+            certificateFileName: cert.certificateFileName || cert.certificate_file_name || '',
+            certificateFileUrl: cert.certificateFileUrl || cert.certificate_file_url || '',
+            rejectionReason: cert.rejectionReason || cert.rejection_reason || '',
+            verifiedBy: cert.verifiedBy || cert.verified_by || null,
+            verifiedAt: cert.verifiedAt || cert.verified_at || null,
+          }))
+        : [];
+    } catch (err) {
+      console.warn('getCredentials backend fetch notice:', err.message);
+      return [];
+    }
+  },
+
+  addCertificate: async (certData) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/certifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(certData),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to add certificate' };
+      }
+      return { success: true, certificate: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  updateCertificate: async (certId, certData) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/certifications/${certId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(certData),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to update certificate' };
+      }
+      return { success: true, certificate: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteCertificate: async (certId) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/certifications/${certId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to delete certificate' };
+      }
+      return { success: true, data: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  verifyCertificate: async (certId, status, rejectionReason = '') => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/certifications/${certId}/verify`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status, rejection_reason: rejectionReason }),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to verify certificate' };
+      }
+      return { success: true, certificate: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   },
 
   getProjects: async () => {
+    const token = getAuthToken();
+    if (token) {
+      try {
+        const response = await fetch('http://localhost:5000/api/users/projects', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await response.json();
+        if (!response.ok) throw new Error(json.message || 'Failed to load projects');
+
+        return Array.isArray(json.data)
+          ? json.data.map((project) => ({
+              id: project.id,
+              title: project.project_name || project.name || 'Untitled Project',
+              project_name: project.project_name || project.name || '',
+              description: project.description || '',
+              techStack: Array.isArray(project.technologies_used) ? project.technologies_used : [],
+              technologies_used: Array.isArray(project.technologies_used) ? project.technologies_used : [],
+              githubUrl: project.github_url || '',
+              demoUrl: project.demo_url || '',
+              link: project.github_url || project.demo_url || '#',
+              featured: Boolean(project.is_featured),
+              stars: 0,
+              verified: false,
+              status: 'Not Verified',
+            }))
+          : [];
+      } catch (err) {
+        console.warn('getProjects backend fetch notice:', err.message);
+      }
+    }
+
     return new Promise((resolve) => {
       setTimeout(() => {
         const currentUser = api.getCurrentUser();
@@ -1061,7 +1296,8 @@ export const api = {
               techStack: prof.skills.map((s) => s.name || s).slice(0, 4),
               link: `https://github.com/${currentUser.name.toLowerCase().replace(/\s+/g, '')}/skill-mapper`,
               stars: 12,
-              verified: true,
+              verified: false,
+              status: 'Not Verified',
             },
           ]);
         } else {
@@ -1069,6 +1305,71 @@ export const api = {
         }
       }, 150);
     });
+  },
+
+  addProject: async (projectData) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch('http://localhost:5000/api/users/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(projectData),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to add project' };
+      }
+      return { success: true, project: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  updateProject: async (projectId, projectData) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/projects/${projectId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(projectData),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to update project' };
+      }
+      return { success: true, project: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteProject: async (projectId) => {
+    const token = getAuthToken();
+    if (!token) return { success: false, error: 'Not logged in' };
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/users/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        return { success: false, error: json.message || 'Unable to delete project' };
+      }
+      return { success: true, data: json.data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   },
 
   getFaculty: async () => {

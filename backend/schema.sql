@@ -37,7 +37,64 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
--- 5. Create Jobs Table
+-- 5. Create Student Profiles Table
+CREATE TABLE IF NOT EXISTS student_profiles (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    headline VARCHAR(255),
+    about TEXT,
+    bio TEXT,
+    location VARCHAR(255),
+    preferred_role VARCHAR(255),
+    preferred_job_type VARCHAR(255),
+    preferred_location VARCHAR(255),
+    institution VARCHAR(255),
+    department VARCHAR(255),
+    degree VARCHAR(255),
+    graduation_year VARCHAR(20),
+    cgpa VARCHAR(20),
+    profile_visibility VARCHAR(30) NOT NULL DEFAULT 'private' CHECK (
+        profile_visibility IN ('private', 'public', 'institution_only')
+    ),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Create Student Projects Table
+CREATE TABLE IF NOT EXISTS student_projects (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    technologies_used TEXT[] DEFAULT '{}',
+    github_url TEXT,
+    demo_url TEXT,
+    is_featured BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. Create Student Certifications Table
+CREATE TABLE IF NOT EXISTS student_certifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    certificate_name VARCHAR(255) NOT NULL,
+    issuing_organization VARCHAR(255) NOT NULL,
+    issue_date DATE NOT NULL,
+    expiry_date DATE,
+    credential_id VARCHAR(255),
+    credential_url TEXT,
+    certificate_file_name VARCHAR(255),
+    certificate_file_url TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'Pending Verification' CHECK (status IN ('Pending Verification', 'Verified', 'Rejected')),
+    rejection_reason TEXT,
+    verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    verified_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8. Create Jobs Table
 CREATE TABLE IF NOT EXISTS jobs (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
@@ -108,6 +165,13 @@ CREATE TABLE IF NOT EXISTS user_skills (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     skill_name VARCHAR(100) NOT NULL,
+    source_type VARCHAR(40) NOT NULL DEFAULT 'Student-Declared',
+    verification_status VARCHAR(30) NOT NULL DEFAULT 'Unverified',
+    evidence_type VARCHAR(50),
+    evidence_ref VARCHAR(255),
+    verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    verified_at TIMESTAMP WITH TIME ZONE,
+    source_id INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_user_skill UNIQUE (user_id, skill_name)
 );

@@ -8,6 +8,25 @@ const { requireRole } = require('../middleware/roleMiddleware');
 router.get('/me', verifyToken, userController.getMyProfile);
 router.put('/profile', verifyToken, userController.updateMyProfile);
 
+// Student portfolio skill management
+router.get('/skills', verifyToken, userController.getMySkills);
+router.post('/skills', verifyToken, userController.createMySkill);
+router.put('/skills/:id', verifyToken, userController.updateMySkill);
+router.delete('/skills/:id', verifyToken, userController.deleteMySkill);
+
+// Student portfolio project management
+router.get('/projects', verifyToken, userController.getMyProjects);
+router.post('/projects', verifyToken, userController.createMyProject);
+router.put('/projects/:id', verifyToken, userController.updateMyProject);
+router.delete('/projects/:id', verifyToken, userController.deleteMyProject);
+
+// Student portfolio certification management
+router.get('/certifications', verifyToken, userController.getMyCertifications);
+router.post('/certifications', verifyToken, userController.createMyCertification);
+router.put('/certifications/:id', verifyToken, userController.updateMyCertification);
+router.delete('/certifications/:id', verifyToken, userController.deleteMyCertification);
+router.patch('/certifications/:id/verify', verifyToken, requireRole('platform_admin', 'institution_admin', 'academician'), userController.verifyCertification);
+
 // Example of Role-Restricted Admin Route
 router.get(
   '/admin/overview',

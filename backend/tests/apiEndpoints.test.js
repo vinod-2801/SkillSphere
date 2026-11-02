@@ -5,7 +5,11 @@
 
 const http = require('http');
 const assert = require('assert');
-const app = require('../server');
+const backend = require('../server');
+const app = backend.app || backend;
+const db = require('../src/config/db');
+const userController = require('../src/controllers/userController');
+const userModel = require('../src/models/userModel');
 
 let server;
 let baseUrl;
@@ -46,6 +50,8 @@ function makeRequest(method, path, body = null, headers = {}) {
 }
 
 async function runApiTests() {
+  await backend.ensureDatabaseReady?.();
+
   console.log('====================================================');
   console.log('🌐 TESTING SKILLSPHERE HTTP API ENDPOINTS');
   console.log('====================================================\n');
@@ -138,6 +144,70 @@ async function runApiTests() {
     assert.strictEqual(jobs.status, 200);
     assert(Array.isArray(jobs.body.data) && jobs.body.data.length >= 3);
     console.log(`  PASS: GET /api/jobs (Returned ${jobs.body.data.length} benchmark jobs)`);
+
+    // 9. Phase 2 student skills/projects contract
+    assert.strictEqual(typeof userController.getMySkills, 'function');
+    assert.strictEqual(typeof userController.createMySkill, 'function');
+    assert.strictEqual(typeof userController.updateMySkill, 'function');
+    assert.strictEqual(typeof userController.deleteMySkill, 'function');
+    assert.strictEqual(typeof userController.getMyProjects, 'function');
+    assert.strictEqual(typeof userController.createMyProject, 'function');
+    assert.strictEqual(typeof userController.updateMyProject, 'function');
+    assert.strictEqual(typeof userController.deleteMyProject, 'function');
+    assert.strictEqual(typeof userController.mergeSkillLists, 'function');
+    assert.deepStrictEqual(
+      userController.mergeSkillLists(
+        [{ id: 1, skill_name: 'JavaScript' }, { id: 2, skill_name: 'Python' }],
+        [{ id: 9, skill_name: 'Python' }, { id: 10, skill_name: 'React' }]
+      ).map((skill) => skill.name || skill.skill_name),
+      ['JavaScript', 'Python', 'React']
+    );
+    console.log('  PASS: Phase 2 student skills/projects CRUD API contract exists');
+
+    // 10. Phase 3 certifications database-backed validation
+    const studentUser = (await db.query("SELECT id FROM users WHERE role = 'student' ORDER BY id LIMIT 1")).rows[0];
+    const verifierUser = (await db.query("SELECT id FROM users WHERE role IN ('platform_admin', 'institution_admin', 'academician') ORDER BY id LIMIT 1")).rows[0];
+    assert(studentUser, 'Expected at least one student user in the database');
+    assert(verifierUser, 'Expected at least one verifier/admin user in the database');
+
+    const beforeCerts = await userModel.getStudentCertificationsByUserId(studentUser.id);
+    const cert = await userModel.createStudentCertification(studentUser.id, {
+      certificateName: 'DB Test Certification',
+      issuingOrganization: 'SkillSphere Labs',
+      issueDate: '2026-03-01',
+      expiryDate: '2028-03-01',
+      credentialId: 'DB-TEST-001',
+      credentialUrl: 'https://example.com/cert/1',
+      certificateFileName: 'db-test-cert.pdf',
+      certificateFileUrl: 'https://example.com/files/db-test-cert.pdf',
+    });
+    assert(cert, 'Expected certificate creation to succeed');
+    assert.strictEqual(cert.status, 'Pending Verification');
+
+    const listed = await userModel.getStudentCertificationsByUserId(studentUser.id);
+    assert(listed.some((item) => item.certificate_name === 'DB Test Certification'));
+
+    const updated = await userModel.updateStudentCertification(studentUser.id, cert.id, {
+      certificateName: 'DB Test Certification v2',
+      issuingOrganization: 'SkillSphere Labs',
+      issueDate: '2026-03-01',
+    });
+    assert(updated, 'Expected certificate update to succeed');
+    assert.strictEqual(updated.status, 'Pending Verification');
+
+    const selfVerify = await userModel.verifyStudentCertification(studentUser.id, cert.id, { status: 'Verified' });
+    assert.strictEqual(selfVerify && selfVerify.forbidden, true, 'Students must not be able to verify their own certificate');
+
+    const adminVerify = await userModel.verifyStudentCertification(verifierUser.id, cert.id, { status: 'Verified' });
+    assert(adminVerify, 'Expected verifier/admin to approve certificate');
+    assert.strictEqual(adminVerify.status, 'Verified');
+
+    const deleted = await userModel.deleteStudentCertification(studentUser.id, cert.id);
+    assert.strictEqual(deleted, true, 'Expected certificate deletion to succeed');
+    const afterDelete = await userModel.getStudentCertificationsByUserId(studentUser.id);
+    assert(!afterDelete.some((item) => item.certificate_name === 'DB Test Certification v2'));
+
+    console.log('  PASS: Phase 3 certifications database-backed CRUD and verification checks');
 
     console.log('\n====================================================');
     console.log('ALL API ENDPOINT TESTS COMPLETED SUCCESSFULLY!');

@@ -5,7 +5,104 @@ async function runMigration() {
   try {
     await client.query('BEGIN');
 
-    // 1. Resumes table (Permanent storage of resume text, metadata & extracted skills)
+    // 1. Student portfolio profile table (one record per student)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS student_profiles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        headline VARCHAR(255),
+        about TEXT,
+        bio TEXT,
+        location VARCHAR(255),
+        preferred_role VARCHAR(255),
+        preferred_job_type VARCHAR(255),
+        preferred_location VARCHAR(255),
+        institution VARCHAR(255),
+        department VARCHAR(255),
+        degree VARCHAR(255),
+        graduation_year VARCHAR(20),
+        cgpa VARCHAR(20),
+        profile_visibility VARCHAR(30) NOT NULL DEFAULT 'private' CHECK (profile_visibility IN ('private', 'public', 'institution_only')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 2. User skill table (reused, not duplicated)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_skills (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        skill_name VARCHAR(100) NOT NULL,
+        source_type VARCHAR(40) NOT NULL DEFAULT 'Student-Declared',
+        verification_status VARCHAR(30) NOT NULL DEFAULT 'Unverified',
+        evidence_type VARCHAR(50),
+        evidence_ref VARCHAR(255),
+        verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        verified_at TIMESTAMP WITH TIME ZONE,
+        source_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_user_skill UNIQUE (user_id, skill_name)
+      );
+    `);
+
+    await client.query(`
+      ALTER TABLE user_skills
+        ADD COLUMN IF NOT EXISTS source_type VARCHAR(40),
+        ADD COLUMN IF NOT EXISTS verification_status VARCHAR(30),
+        ADD COLUMN IF NOT EXISTS evidence_type VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS evidence_ref VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS source_id INTEGER;
+    `);
+
+    await client.query(`
+      UPDATE user_skills
+      SET source_type = COALESCE(NULLIF(source_type, ''), 'Student-Declared'),
+          verification_status = COALESCE(NULLIF(verification_status, ''), 'Unverified')
+      WHERE source_type IS NULL OR verification_status IS NULL;
+    `);
+
+    // 3. Student project table (one-to-many portfolio projects)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS student_projects (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        project_name VARCHAR(255) NOT NULL,
+        description TEXT,
+        technologies_used TEXT[] DEFAULT '{}',
+        github_url TEXT,
+        demo_url TEXT,
+        is_featured BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 4. Student certifications table (portfolio credentials pending external verification)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS student_certifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        certificate_name VARCHAR(255) NOT NULL,
+        issuing_organization VARCHAR(255) NOT NULL,
+        issue_date DATE NOT NULL,
+        expiry_date DATE,
+        credential_id VARCHAR(255),
+        credential_url TEXT,
+        certificate_file_name VARCHAR(255),
+        certificate_file_url TEXT,
+        status VARCHAR(30) NOT NULL DEFAULT 'Pending Verification' CHECK (status IN ('Pending Verification', 'Verified', 'Rejected')),
+        rejection_reason TEXT,
+        verified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        verified_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 5. Resumes table (Permanent storage of resume text, metadata & extracted skills)
     await client.query(`
       CREATE TABLE IF NOT EXISTS resumes (
         id SERIAL PRIMARY KEY,
@@ -20,7 +117,7 @@ async function runMigration() {
       );
     `);
 
-    // 2. Add resume_id to applications
+    // 4. Add resume_id to applications
     await client.query(`
       ALTER TABLE applications
       ADD COLUMN IF NOT EXISTS resume_id INTEGER REFERENCES resumes(id) ON DELETE SET NULL;

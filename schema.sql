@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS student_skills (
     skill_name VARCHAR(100) NOT NULL,
     normalized_name VARCHAR(100) NOT NULL,
     category VARCHAR(50) DEFAULT 'Technical',
+    source_type VARCHAR(40) NOT NULL DEFAULT 'Student-Declared',
+    verification_status VARCHAR(30) NOT NULL DEFAULT 'Unverified',
+    evidence_type VARCHAR(50),
+    evidence_ref VARCHAR(255),
+    verified_by INTEGER REFERENCES students(id) ON DELETE SET NULL,
+    verified_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(student_id, normalized_name)
 );

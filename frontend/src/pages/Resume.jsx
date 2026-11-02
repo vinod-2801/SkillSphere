@@ -38,18 +38,35 @@ export default function Resume() {
           : (data?.skills || []);
 
         if (hasSavedResume || savedSkills.length > 0) {
-          const formattedSkills = savedSkills.map((skill) =>
-            typeof skill === 'string'
-              ? { name: skill, category: 'Technical Skill', verified: true }
-              : skill
-          );
+          const formattedSkills = savedSkills.map((skill) => {
+            if (typeof skill === 'string') {
+              return {
+                name: skill,
+                category: 'Technical Skill',
+                sourceType: 'Resume-Extracted',
+                verificationStatus: 'Unverified',
+                verified: false,
+              };
+            }
+
+            const status = skill.verification_status || skill.verificationStatus || skill.status || 'Unverified';
+            const source = skill.source_type || skill.sourceType || skill.source || 'Resume-Extracted';
+
+            return {
+              ...skill,
+              name: skill.name || skill.skill_name || '',
+              sourceType: source,
+              verificationStatus: status,
+              verified: String(status) === 'Verified',
+            };
+          });
           const score = resumeData?.employabilityScore ?? data?.employabilityScore ?? null;
 
           setAnalysisResult({
             extractedSkills: formattedSkills,
             employabilityScore: score,
             skillCount: formattedSkills.length,
-            explanation: `Retrieved ${formattedSkills.length} verified technical skill credentials from your saved resume profile.`
+            explanation: `Retrieved ${formattedSkills.length} resume-derived skill suggestions from your saved resume profile. These are unverified until supported by independent evidence.`
           });
           setAnalysisState('complete');
         }
@@ -166,7 +183,9 @@ export default function Resume() {
       const formattedSkills = extractedSkills.map((skill) => ({
         name: skill,
         category: 'Technical Skill',
-        verified: true
+        sourceType: 'Resume-Extracted',
+        verificationStatus: 'Unverified',
+        verified: false,
       }));
 
       setAnalysisResult({

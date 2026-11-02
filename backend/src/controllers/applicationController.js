@@ -74,13 +74,25 @@ const apply = async (req, res, next) => {
       );
     }
 
-    // 4. Verification Check: Student must have verified skills
-    const userSkills = await skillMatchModel.getUserSkills(applicantId);
-    if (!userSkills || userSkills.length === 0) {
+    // 4. Verification Check: Student must have actual verified skills for eligibility checks.
+    const userSkillRecords = await skillMatchModel.getUserSkillRecords(applicantId);
+    const verifiedUserSkills = (userSkillRecords || [])
+      .filter((skill) => (skill.verification_status || 'Unverified') === 'Verified')
+      .map((skill) => skill.skill_name);
+
+    if (!userSkillRecords || userSkillRecords.length === 0) {
       return sendError(
         res,
         400,
-        'Eligibility Error: Please complete resume analysis to verify your skills before applying.'
+        'Eligibility Error: Please complete resume analysis before applying.'
+      );
+    }
+
+    if (verifiedUserSkills.length === 0) {
+      return sendError(
+        res,
+        400,
+        'Eligibility Error: No verified skills are available yet. Resume-extracted skills are suggestions, not proof of proficiency.'
       );
     }
 
@@ -100,7 +112,7 @@ const apply = async (req, res, next) => {
 
     // Eligibility check against required skills
     if (targetListing && Array.isArray(targetListing.required_skills) && targetListing.required_skills.length > 0) {
-      const normalizedUserSkills = skillNormalizer.normalizeSkills(userSkills);
+      const normalizedUserSkills = skillNormalizer.normalizeSkills(verifiedUserSkills);
       const normalizedRequired = skillNormalizer.normalizeSkills(targetListing.required_skills);
 
       const matched = normalizedRequired.filter((reqSkill) =>
